@@ -1,8 +1,7 @@
-﻿using System.Linq;
+using System.Linq;
 using EloBuddy.SDK.Constants;
 using EloBuddy.SDK.Menu.Values;
 using EloBuddy.SDK.Rendering;
-
 // ReSharper disable InconsistentNaming
 
 namespace NidaleeBuddyEvolution
@@ -71,6 +70,8 @@ namespace NidaleeBuddyEvolution
         /// </summary>
         public static DamageIndicator.DamageIndicator Indicator;
 
+        public static MissileClient missile = null;
+
         /// <summary>
         /// Called when Program Starts
         /// </summary>
@@ -91,25 +92,21 @@ namespace NidaleeBuddyEvolution
             }
 
             // Human Form
-            QHuman = new Spell.Skillshot(SpellSlot.Q, 1500, SkillShotType.Linear, 500, 1300, 40)
+            QHuman = new Spell.Skillshot(SpellSlot.Q, 1450, SkillShotType.Linear, 25, 1450, 1)
             {
                 AllowedCollisionCount = 0
             };
-            WHuman = new Spell.Skillshot(SpellSlot.W, 875, SkillShotType.Circular, 500, 1450, 100);
+            WHuman = new Spell.Skillshot(SpellSlot.W, 875, SkillShotType.Circular, 250, int.MaxValue, 100);
             EHuman = new Spell.Targeted(SpellSlot.E, 600);
-            R = new Spell.Active(SpellSlot.R);
+            R = new Spell.Active(SpellSlot.R, int.MaxValue);
 
             // Javelin Toss -> Pounce
-            WExtended = new Spell.Skillshot(SpellSlot.W, 740, SkillShotType.Circular, 500, int.MaxValue, 210);
+            WExtended = new Spell.Skillshot(SpellSlot.W, 750, SkillShotType.Circular, 500, int.MaxValue, 400);
 
             // Cougar Form
-            QCat = new Spell.Targeted(SpellSlot.Q, 500);
-            WCat = new Spell.Skillshot(SpellSlot.W, 375, SkillShotType.Circular, 500, int.MaxValue, 210);
-            ECat = new Spell.Skillshot(SpellSlot.E, 310, SkillShotType.Cone, 500, int.MaxValue,
-                (int) (15.00*Math.PI/180.00))
-            {
-                ConeAngleDegrees = 90
-            };
+            QCat = new Spell.Targeted(SpellSlot.Q, 400);
+            WCat = new Spell.Skillshot(SpellSlot.W, 375, SkillShotType.Circular, 500, int.MaxValue, 400);
+            ECat = new Spell.Skillshot(SpellSlot.E, 300, SkillShotType.Cone, 250, int.MaxValue, (int)(15.00 * Math.PI / 180.00));
 
             // Ignite
             if (Essentials.HasSpell("ignite"))
@@ -120,7 +117,7 @@ namespace NidaleeBuddyEvolution
             // Smite
             if (Essentials.HasSpell("smite"))
             {
-                Essentials.SetSmiteSlot();
+                //Essentials.SetSmiteSlot();
             }
 
             // Initializes the Menu
@@ -193,21 +190,53 @@ namespace NidaleeBuddyEvolution
         /// <param name="args"></param>
         private static void GameObject_OnDelete(GameObject sender, EventArgs args)
         {
+            if (!Orbwalker.ActiveModesFlags.HasFlag(Orbwalker.ActiveModes.Combo))
+            {
+                return;
+            }
+
             var missile = sender as MissileClient;
 
-            if (missile == null) return;
-
-            if (missile.SpellCaster.IsMe && missile.SData.Name == "JavelinToss")
+            if (missile != null)
             {
-                var target =
-                    EntityManager.Heroes.Enemies.FirstOrDefault(t => t.IsValidTarget() && Essentials.IsHunted(t));
-
-                if (target == null)
+                if (missile.SpellCaster.IsMe && missile.SData.Name == "JavelinToss")
                 {
-                    return;
-                }
+                    var target =
+                            EntityManager.Heroes.Enemies.FirstOrDefault(Essentials.IsHunted);
 
-                Essentials.LastHuntedTarget = target;
+                    if (target == null)
+                    {
+                        return;
+                    }
+
+                    if (!WExtended.IsInRange(target))
+                    {
+                        Essentials.LastHuntedTarget = target;
+                        return;
+                    }
+
+                    if (Essentials.IsReady(Essentials.SpellTimer["ExPounce"]))
+                    {
+                        if (!Essentials.CatForm() && Essentials.ShouldUseSpell(target, SpellSlot.R, NidaleeMenu.ComboMenu))
+                        {
+                            R.Cast();
+                            Core.DelayAction(() =>
+                            {
+                                if (Essentials.ShouldUseSpell(target, SpellSlot.W, NidaleeMenu.ComboMenu))
+                                {
+                                    WExtended.Cast(target.ServerPosition);
+                                }
+                            }, R.CastDelay);
+                        }
+                        else if (Essentials.CatForm())
+                        {
+                            if (Essentials.ShouldUseSpell(target, SpellSlot.W, NidaleeMenu.ComboMenu))
+                            {
+                                WExtended.Cast(target.ServerPosition);
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -221,8 +250,7 @@ namespace NidaleeBuddyEvolution
 
             if (NidaleeMenu.DrawingMenu["drawQH"].Cast<CheckBox>().CurrentValue)
             {
-                Circle.Draw(QHuman.IsReady() ? SharpDX.Color.Green : SharpDX.Color.Red, QHuman.Range,
-                    Player.Instance.Position);
+                Circle.Draw(QHuman.IsReady() ? SharpDX.Color.Green : SharpDX.Color.Red, QHuman.Range, Player.Instance.Position);
             }
 
             if (NidaleeMenu.DrawingMenu["drawPred"].Cast<CheckBox>().CurrentValue)
@@ -260,34 +288,33 @@ namespace NidaleeBuddyEvolution
                 if (unit.IsValidTarget() && Essentials.IsHunted(unit))
                     Essentials.TimeStamp["Pounce"] = Game.Time + 1.5f;
                 else
-                    Essentials.TimeStamp["Pounce"] = Game.Time + (5 + (5*Player.Instance.PercentCooldownMod));
+                    Essentials.TimeStamp["Pounce"] = Game.Time + (5 + (5 * Player.Instance.PercentCooldownMod));
             }
 
             if (sender.IsMe && args.SData.Name.ToLower() == "swipe")
             {
-                Essentials.TimeStamp["Swipe"] = Game.Time + (5 + (5*Player.Instance.PercentCooldownMod));
+                Essentials.TimeStamp["Swipe"] = Game.Time + (5 + (5 * Player.Instance.PercentCooldownMod));
             }
 
             if (sender.IsMe && args.SData.Name.ToLower() == "primalsurge")
             {
-                Essentials.TimeStamp["Primalsurge"] = Game.Time + (12 + (12*Player.Instance.PercentCooldownMod));
+                Essentials.TimeStamp["Primalsurge"] = Game.Time + (12 + (12 * Player.Instance.PercentCooldownMod));
             }
 
             if (sender.IsMe && args.SData.Name.ToLower() == "bushwhack")
             {
-                var wperlevel = new[] {0, 13, 12, 11, 10, 9}[WCat.Level];
-                Essentials.TimeStamp["Bushwhack"] = Game.Time +
-                                                    (wperlevel + (wperlevel*Player.Instance.PercentCooldownMod));
+                var wperlevel = new[] { 13, 12, 11, 10, 9 }[WCat.Level];
+                Essentials.TimeStamp["Bushwhack"] = Game.Time + (wperlevel + (wperlevel * Player.Instance.PercentCooldownMod));
             }
 
             if (sender.IsMe && args.SData.Name.ToLower() == "javelintoss")
             {
-                Essentials.TimeStamp["Javelin"] = Game.Time + (6 + (6*Player.Instance.PercentCooldownMod));
+                Essentials.TimeStamp["Javelin"] = Game.Time + (6 + (6 * Player.Instance.PercentCooldownMod));
             }
 
             if (sender.IsMe && args.SData.IsAutoAttack() && Player.Instance.HasBuff("Takedown"))
             {
-                Essentials.TimeStamp["Takedown"] = Game.Time + (5 + (5*Player.Instance.PercentCooldownMod));
+                Essentials.TimeStamp["Takedown"] = Game.Time + (5 + (5 * Player.Instance.PercentCooldownMod));
             }
         }
 
